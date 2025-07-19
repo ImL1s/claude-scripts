@@ -234,15 +234,17 @@ if ! osascript -e 'tell application "System Events" to return' &> /dev/null; the
     exit 1
 fi
 
-# AppleScript to find all Terminal windows and type 'continue' + Enter
+# AppleScript to find all Terminal windows and type command + Enter
 # Disable strict mode temporarily for osascript as it may return non-zero on warnings
 set +e
-osascript <<EOF
-tell application "$TERMINAL_APP"
+
+# Create the AppleScript with proper escaping
+osascript -e "
+tell application \"$TERMINAL_APP\"
     -- Get count of windows
     set windowCount to count of windows
     
-    if windowCount  0 then
+    if windowCount > 0 then
         -- Loop through all windows
         repeat with i from 1 to windowCount
             -- First, activate the window to bring it to front
@@ -262,10 +264,10 @@ tell application "$TERMINAL_APP"
                 delay 0.3
                 
                 -- Type the command and press Enter
-                tell application "System Events"
-                    tell process "$TERMINAL_APP"
+                tell application \"System Events\"
+                    tell process \"$TERMINAL_APP\"
                         -- Type the command text
-                        keystroke "$ESCAPED_COMMAND"
+                        keystroke \"$COMMAND_TEXT\"
                         delay 0.2
                         
                         -- Use key code 36 for Enter key
@@ -278,12 +280,12 @@ tell application "$TERMINAL_APP"
             end repeat
         end repeat
         
-        display notification "Sent '$ESCAPED_COMMAND' to all terminal windows" with title "Auto Continue Script"
+        display notification \"Command sent to all terminal windows\" with title \"Auto Continue Script\"
     else
-        display notification "No Terminal windows found" with title "Auto Continue Script"
+        display notification \"No Terminal windows found\" with title \"Auto Continue Script\"
     end if
 end tell
-EOF
+"
 
 # Capture osascript exit code
 OSASCRIPT_EXIT_CODE=$?
