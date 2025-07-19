@@ -32,7 +32,7 @@
 #   - Default command is 'continue' if not specified
 #
 # Author: Auto-generated script
-# Version: 2.0.0
+# Version: 2.0.1
 #
 
 # Enable strict error handling
@@ -210,6 +210,9 @@ fi
 
 echo "Finding all Terminal windows and sending '$COMMAND_TEXT' command..."
 
+# Escape special characters for AppleScript
+ESCAPED_COMMAND=$(echo "$COMMAND_TEXT" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
+
 # Check if Terminal app is running (支援中文和英文版 macOS)
 if ! pgrep -x "Terminal" > /dev/null && ! pgrep -x "終端機" > /dev/null; then
     echo "Error: Terminal/終端機 application is not running"
@@ -258,37 +261,24 @@ tell application "$TERMINAL_APP"
                 -- Small delay to ensure the tab is active
                 delay 0.3
                 
-                -- Get the current path of the tab
-                set tabPath to do script "pwd" in tab j of window i
-                delay 0.5
-                
-                -- Check for Claude
-                set isClaudeRunning to false
-                try
-                    set isClaudeRunning to (do script "pgrep -fl 'claude'" in tab j of window i)  ""
-                end try
-                
-                -- Determine if the command should be sent
-                if $LEGACY_MODE or (tabPath is in map of path from CONFIGS and isClaudeRunning) then
-                    -- Type the command and press Enter
-                    tell application "System Events"
-                        tell process "$TERMINAL_APP"
-                            -- Type the command text
-                            keystroke "$COMMAND_TEXT"
-                            delay 0.2
-                            
-                            -- Use key code 36 for Enter key
-                            key code 36
-                        end tell
+                -- Type the command and press Enter
+                tell application "System Events"
+                    tell process "$TERMINAL_APP"
+                        -- Type the command text
+                        keystroke "$ESCAPED_COMMAND"
+                        delay 0.2
+                        
+                        -- Use key code 36 for Enter key
+                        key code 36
                     end tell
-                end if
+                end tell
                 
                 -- Small delay between tabs
                 delay 0.3
             end repeat
         end repeat
         
-        display notification "Finished processing terminal windows" with title "Auto Continue Script"
+        display notification "Sent '$ESCAPED_COMMAND' to all terminal windows" with title "Auto Continue Script"
     else
         display notification "No Terminal windows found" with title "Auto Continue Script"
     end if
