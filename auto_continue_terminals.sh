@@ -8,7 +8,12 @@
 #   The script prevents system sleep while waiting using caffeinate.
 #
 # Usage:
-#   ./auto_continue_terminals.sh                    # Execute immediately with 'continue' to all Claude terminals
+#   ./auto_continue_terminals.sh                    # Execute immediately with 'continue' to marked terminals
+#   ./auto_continue_terminals.sh --all             # Execute immediately to ALL terminals (no filtering)
+#   ./auto_continue_terminals.sh --all "command"   # Execute custom command to ALL terminals
+#   ./auto_continue_terminals.sh HH:MM --all       # Execute at specified time to ALL terminals
+#   ./auto_continue_terminals.sh HH:MM --all "command"  # Execute custom command at specified time to ALL terminals
+#   ./auto_continue_terminals.sh --title           # Execute to terminals with specific titles (old behavior)
 #   ./auto_continue_terminals.sh HH:MM              # Execute at specified time with 'continue'
 #   ./auto_continue_terminals.sh HH:MM "command"    # Execute at specified time with custom command
 #   ./auto_continue_terminals.sh "path:HH:MM:command" ["path2:HH:MM:command2" ...]  # Advanced mode
@@ -32,7 +37,7 @@
 #   - Default command is 'continue' if not specified
 #
 # Author: Auto-generated script
-# Version: 2.0.1
+# Version: 2.2.0
 #
 
 # Enable strict error handling
@@ -87,13 +92,37 @@ parse_config() {
 # Default values
 COMMAND_TEXT="continue"
 TARGET_TIME=""
+SEND_TO_ALL=false
+USE_TITLE_DETECTION=false
+MARKER_DIR="$HOME/.claude_markers"
 
 # Parse arguments
 if [ $# -eq 0 ]; then
-    # No arguments - execute immediately to all Claude terminals
+    # No arguments - execute immediately to marked terminals
     echo "No arguments provided. Executing immediately with default command: '$COMMAND_TEXT'"
+    echo "Will send to terminals marked with claude_marker.sh"
     TARGET_TIME=$(date +"%H:%M")
-    LEGACY_MODE=false  # In default mode, only target Claude terminals
+    LEGACY_MODE=false  # In default mode, only target marked terminals
+elif [ $# -eq 1 ] && [ "$1" = "--all" ]; then
+    # Send to all terminals without filtering
+    echo "Sending to ALL terminals with command: '$COMMAND_TEXT'"
+    TARGET_TIME=$(date +"%H:%M")
+    SEND_TO_ALL=true
+    LEGACY_MODE=false
+elif [ $# -eq 2 ] && [ "$1" = "--all" ]; then
+    # Send custom command to all terminals
+    COMMAND_TEXT=$2
+    echo "Sending to ALL terminals with custom command: '$COMMAND_TEXT'"
+    TARGET_TIME=$(date +"%H:%M")
+    SEND_TO_ALL=true
+    LEGACY_MODE=false
+elif [ $# -eq 1 ] && [ "$1" = "--title" ]; then
+    # Use title-based detection (old behavior)
+    echo "Using title-based detection with command: '$COMMAND_TEXT'"
+    echo "Will send to terminals with titles containing: Altrathink, Claude, or 文檔"
+    TARGET_TIME=$(date +"%H:%M")
+    USE_TITLE_DETECTION=true
+    LEGACY_MODE=false
 elif [ $# -eq 1 ]; then
     # Check if it's a time or advanced config
     if [[ "$1" =~ ^[0-9]{2}:[0-9]{2}$ ]]; then
@@ -113,6 +142,19 @@ elif [ $# -eq 1 ]; then
         echo "Error: Invalid argument format"
         exit 1
     fi
+elif [ $# -eq 2 ] && [[ "$1" =~ ^[0-9]{2}:[0-9]{2}$ ]] && [ "$2" = "--all" ]; then
+    # Timed execution with --all, default command
+    TARGET_TIME=$1
+    SEND_TO_ALL=true
+    LEGACY_MODE=false
+    echo "Scheduled default command 'continue' for ALL terminals at $TARGET_TIME"
+elif [ $# -eq 3 ] && [[ "$1" =~ ^[0-9]{2}:[0-9]{2}$ ]] && [ "$2" = "--all" ]; then
+    # Timed execution with --all and custom command
+    TARGET_TIME=$1
+    COMMAND_TEXT=$3
+    SEND_TO_ALL=true
+    LEGACY_MODE=false
+    echo "Scheduled command '$COMMAND_TEXT' for ALL terminals at $TARGET_TIME"
 elif [ $# -eq 2 ] && [[ "$1" =~ ^[0-9]{2}:[0-9]{2}$ ]] && ! [[ "$2" =~ .*:.*:.* ]]; then
     # Legacy mode - time and command
     TARGET_TIME=$1
@@ -208,7 +250,13 @@ if [ $# -ge 1 ] && [ "$(date +"%H:%M")" != "$TARGET_TIME" ]; then
     done
 fi
 
-echo "Finding all Terminal windows and sending '$COMMAND_TEXT' command..."
+if [ "$SEND_TO_ALL" = true ]; then
+    echo "Finding ALL Terminal windows and sending '$COMMAND_TEXT' command..."
+elif [ "$USE_TITLE_DETECTION" = true ]; then
+    echo "Finding Terminal windows with specific titles and sending '$COMMAND_TEXT' command..."
+else
+    echo "Finding Terminal windows marked as running Claude and sending '$COMMAND_TEXT' command..."
+fi
 
 # Escape special characters for AppleScript
 ESCAPED_COMMAND=$(echo "$COMMAND_TEXT" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
@@ -238,54 +286,121 @@ fi
 # Disable strict mode temporarily for osascript as it may return non-zero on warnings
 set +e
 
-# Create the AppleScript with proper escaping
-osascript -e "
-tell application \"$TERMINAL_APP\"
+# Create a temporary AppleScript file to avoid variable expansion issues
+TEMP_SCRIPT=$(mktemp /tmp/auto_continue_XXXXXX.applescript)
+
+# Write the AppleScript to the temporary file
+cat > "$TEMP_SCRIPT" << 'EOF'
+tell application "TERMINAL_APP_PLACEHOLDER"
     -- Get count of windows
     set windowCount to count of windows
+    set processedCount to 0
+    set claudeCount to 0
     
     if windowCount > 0 then
         -- Loop through all windows
         repeat with i from 1 to windowCount
-            -- First, activate the window to bring it to front
-            set frontmost of window i to true
-            activate
-            
-            -- Small delay to ensure window is fully activated
-            delay 0.5
-            
             -- Loop through all tabs in the window
             set tabCount to count of tabs of window i
             repeat with j from 1 to tabCount
-                -- Select the tab
-                set selected of tab j of window i to true
+                -- Get the custom title of this tab (if available)
+                set tabTitle to ""
+                try
+                    set tabTitle to custom title of tab j of window i
+                end try
                 
-                -- Small delay to ensure the tab is active
-                delay 0.3
+                -- Check if we should send to this terminal
+                set shouldSend to false
                 
-                -- Type the command and press Enter
-                tell application \"System Events\"
-                    tell process \"$TERMINAL_APP\"
-                        -- Type the command text
-                        keystroke \"$COMMAND_TEXT\"
-                        delay 0.2
-                        
-                        -- Use key code 36 for Enter key
-                        key code 36
+                if "SEND_TO_ALL_PLACEHOLDER" = "true" then
+                    -- Send to all terminals
+                    set shouldSend to true
+                else if "USE_TITLE_DETECTION_PLACEHOLDER" = "true" then
+                    -- Check if the tab title matches our criteria
+                    try
+                        if tabTitle contains "Altrathink" or tabTitle contains "altrathink" then
+                            set shouldSend to true
+                        else if tabTitle contains "Claude" or tabTitle contains "claude" then
+                            set shouldSend to true
+                        else if tabTitle contains "文檔" then
+                            set shouldSend to true
+                        else if tabTitle contains "Context" then
+                            set shouldSend to true
+                        end if
+                    end try
+                else
+                    -- Check if this terminal is marked as running Claude
+                    set shouldSend to false
+                end if
+                
+                if shouldSend then
+                    set claudeCount to claudeCount + 1
+                end if
+                
+                if shouldSend then
+                    -- First, activate the window to bring it to front
+                    set frontmost of window i to true
+                    activate
+                    
+                    -- Small delay to ensure window is fully activated
+                    delay 0.5
+                    
+                    -- Select the tab
+                    set selected of tab j of window i to true
+                    
+                    -- Small delay to ensure the tab is active
+                    delay 0.3
+                    
+                    -- Type the command and press Enter
+                    tell application "System Events"
+                        tell process "TERMINAL_APP_PLACEHOLDER"
+                            -- Type the command character by character
+                            repeat with c in characters of "COMMAND_TEXT_PLACEHOLDER"
+                                keystroke c
+                                delay 0.01
+                            end repeat
+                            delay 0.2
+                            
+                            -- Use key code 36 for Enter key
+                            key code 36
+                        end tell
                     end tell
-                end tell
-                
-                -- Small delay between tabs
-                delay 0.3
+                    
+                    set processedCount to processedCount + 1
+                    
+                    -- Small delay between tabs
+                    delay 0.3
+                end if
             end repeat
         end repeat
         
-        display notification \"Command sent to all terminal windows\" with title \"Auto Continue Script\"
+        if processedCount > 0 then
+            display notification "Command sent to " & processedCount & " terminal(s)" with title "Auto Continue Script"
+        else if claudeCount = 0 then
+            display notification "No matching terminals found" with title "Auto Continue Script"
+        else
+            display notification "Found " & claudeCount & " matching terminal(s) but could not send command" with title "Auto Continue Script"
+        end if
     else
-        display notification \"No Terminal windows found\" with title \"Auto Continue Script\"
+        display notification "No Terminal windows found" with title "Auto Continue Script"
     end if
 end tell
-"
+EOF
+
+# Replace placeholders in the script
+sed -i '' "s/TERMINAL_APP_PLACEHOLDER/$TERMINAL_APP/g" "$TEMP_SCRIPT"
+sed -i '' "s/SEND_TO_ALL_PLACEHOLDER/$SEND_TO_ALL/g" "$TEMP_SCRIPT"
+sed -i '' "s/USE_TITLE_DETECTION_PLACEHOLDER/$USE_TITLE_DETECTION/g" "$TEMP_SCRIPT"
+# For command text, we need to escape it properly for sed
+ESCAPED_FOR_SED=$(printf '%s' "$COMMAND_TEXT" | sed 's/[[\.*/]/\\&/g')
+sed -i '' "s/COMMAND_TEXT_PLACEHOLDER/$ESCAPED_FOR_SED/g" "$TEMP_SCRIPT"
+
+# Execute the AppleScript
+osascript "$TEMP_SCRIPT"
+OSASCRIPT_EXIT_CODE=$?
+
+# Clean up the temporary file
+rm -f "$TEMP_SCRIPT"
 
 # Capture osascript exit code
 OSASCRIPT_EXIT_CODE=$?
