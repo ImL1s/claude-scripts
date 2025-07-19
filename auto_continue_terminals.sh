@@ -3,19 +3,21 @@
 # auto_continue_terminals.sh
 # 
 # Description:
-#   This script sends commands to all open Terminal windows and tabs.
-#   It can either execute immediately or wait until a specified time.
+#   This script sends commands to Terminal windows and tabs based on various criteria.
+#   It can filter by path, check for Claude processes, and handle multiple configurations.
 #   The script prevents system sleep while waiting using caffeinate.
 #
 # Usage:
-#   ./auto_continue_terminals.sh                    # Execute immediately with 'continue'
+#   ./auto_continue_terminals.sh                    # Execute immediately with 'continue' to all Claude terminals
 #   ./auto_continue_terminals.sh HH:MM              # Execute at specified time with 'continue'
 #   ./auto_continue_terminals.sh HH:MM "command"    # Execute at specified time with custom command
+#   ./auto_continue_terminals.sh "path:HH:MM:command" ["path2:HH:MM:command2" ...]  # Advanced mode
 #
 # Examples:
-#   ./auto_continue_terminals.sh                    # Sends 'continue' to all terminals now
+#   ./auto_continue_terminals.sh                    # Sends 'continue' to all Claude terminals now
 #   ./auto_continue_terminals.sh 14:30              # Waits until 2:30 PM then sends 'continue'
 #   ./auto_continue_terminals.sh 06:01 "ultrathink continue"  # Sends custom command at 6:01 AM
+#   ./auto_continue_terminals.sh "/Users/me/project:14:30:continue" "/Users/me/work:15:00:analyze"  # Path-specific
 #
 # Requirements:
 #   - macOS with Terminal app
@@ -25,12 +27,12 @@
 #
 # Notes:
 #   - Press Ctrl+C at any time to cancel execution
-#   - The script will send the specified command + Enter to each tab in every Terminal window
+#   - The script will only send commands to terminals running Claude (unless in legacy mode)
 #   - System sleep is prevented while the script is running
 #   - Default command is 'continue' if not specified
 #
 # Author: Auto-generated script
-# Version: 1.2.0
+# Version: 2.0.0
 #
 
 # Enable strict error handling
@@ -60,30 +62,92 @@ trap cleanup EXIT INT TERM HUP
 # Handle Ctrl+C specifically
 trap 'echo -e "\n\nCtrl+C detected. Exiting..."; cleanup' INT
 
-# Default command
+# Global arrays for advanced mode
+declare -a CONFIGS=()
+LEGACY_MODE=true
+ADVANCED_MODE=false
+
+# Function to parse advanced config
+parse_config() {
+    local config=$1
+    IFS=':' read -r path time cmd <<< "$config"
+    if [ -z "$path" ] || [ -z "$time" ] || [ -z "$cmd" ]; then
+        echo "Error: Invalid config format: $config"
+        echo "Expected format: path:HH:MM:command"
+        return 1
+    fi
+    # Validate time format
+    if ! [[ "$time" =~ ^[0-9]{2}:[0-9]{2}$ ]]; then
+        echo "Error: Invalid time format in config: $config"
+        return 1
+    fi
+    return 0
+}
+
+# Default values
 COMMAND_TEXT="continue"
+TARGET_TIME=""
 
 # Parse arguments
 if [ $# -eq 0 ]; then
-    echo "No time provided. Executing immediately with default command: '$COMMAND_TEXT'"
+    # No arguments - execute immediately to all Claude terminals
+    echo "No arguments provided. Executing immediately with default command: '$COMMAND_TEXT'"
     TARGET_TIME=$(date +"%H:%M")
+    LEGACY_MODE=false  # In default mode, only target Claude terminals
 elif [ $# -eq 1 ]; then
-    # Only time provided
-    TARGET_TIME=$1
-    echo "Using default command: '$COMMAND_TEXT'"
-elif [ $# -eq 2 ]; then
-    # Time and custom command provided
+    # Check if it's a time or advanced config
+    if [[ "$1" =~ ^[0-9]{2}:[0-9]{2}$ ]]; then
+        # Legacy mode - time only
+        TARGET_TIME=$1
+        echo "Using default command: '$COMMAND_TEXT'"
+    elif [[ "$1" =~ .*:.*:.* ]]; then
+        # Advanced mode - single config
+        ADVANCED_MODE=true
+        LEGACY_MODE=false
+        if parse_config "$1"; then
+            CONFIGS+=("$1")
+        else
+            exit 1
+        fi
+    else
+        echo "Error: Invalid argument format"
+        exit 1
+    fi
+elif [ $# -eq 2 ] && [[ "$1" =~ ^[0-9]{2}:[0-9]{2}$ ]] && ! [[ "$2" =~ .*:.*:.* ]]; then
+    # Legacy mode - time and command
     TARGET_TIME=$1
     COMMAND_TEXT=$2
     echo "Using custom command: '$COMMAND_TEXT'"
 else
-    echo "Error: Too many arguments"
-    echo "Usage: $0 [HH:MM] [\"custom command\"]"
-    echo "Examples:"
-    echo "  $0                           # Execute immediately with 'continue'"
-    echo "  $0 14:30                     # Execute at 14:30 with 'continue'"
-    echo "  $0 14:30 \"ultrathink continue\" # Execute at 14:30 with custom command"
-    exit 1
+    # Check if all arguments are configs (advanced mode)
+    all_configs=true
+    for arg in "$@"; do
+        if ! [[ "$arg" =~ .*:.*:.* ]]; then
+            all_configs=false
+            break
+        fi
+    done
+    
+    if $all_configs; then
+        # Advanced mode - multiple configs
+        ADVANCED_MODE=true
+        LEGACY_MODE=false
+        for config in "$@"; do
+            if parse_config "$config"; then
+                CONFIGS+=("$config")
+            else
+                exit 1
+            fi
+        done
+    else
+        echo "Error: Invalid arguments"
+        echo "Usage:"
+        echo "  $0                                      # Execute immediately to Claude terminals"
+        echo "  $0 HH:MM                                # Legacy: execute at time"
+        echo "  $0 HH:MM \"command\"                     # Legacy: execute at time with command"
+        echo "  $0 \"path:HH:MM:command\" [...]          # Advanced: path-specific configs"
+        exit 1
+    fi
 fi
 
 # Validate time format if time was provided
@@ -175,7 +239,7 @@ tell application "$TERMINAL_APP"
     -- Get count of windows
     set windowCount to count of windows
     
-    if windowCount > 0 then
+    if windowCount  0 then
         -- Loop through all windows
         repeat with i from 1 to windowCount
             -- First, activate the window to bring it to front
@@ -194,24 +258,37 @@ tell application "$TERMINAL_APP"
                 -- Small delay to ensure the tab is active
                 delay 0.3
                 
-                -- Type the command and press Enter
-                tell application "System Events"
-                    tell process "$TERMINAL_APP"
-                        -- Type the command text
-                        keystroke "$COMMAND_TEXT"
-                        delay 0.2
-                        
-                        -- Use key code 36 for Enter key
-                        key code 36
+                -- Get the current path of the tab
+                set tabPath to do script "pwd" in tab j of window i
+                delay 0.5
+                
+                -- Check for Claude
+                set isClaudeRunning to false
+                try
+                    set isClaudeRunning to (do script "pgrep -fl 'claude'" in tab j of window i)  ""
+                end try
+                
+                -- Determine if the command should be sent
+                if $LEGACY_MODE or (tabPath is in map of path from CONFIGS and isClaudeRunning) then
+                    -- Type the command and press Enter
+                    tell application "System Events"
+                        tell process "$TERMINAL_APP"
+                            -- Type the command text
+                            keystroke "$COMMAND_TEXT"
+                            delay 0.2
+                            
+                            -- Use key code 36 for Enter key
+                            key code 36
+                        end tell
                     end tell
-                end tell
+                end if
                 
                 -- Small delay between tabs
                 delay 0.3
             end repeat
         end repeat
         
-        display notification "Sent '$COMMAND_TEXT' to all terminal windows" with title "Auto Continue Script"
+        display notification "Finished processing terminal windows" with title "Auto Continue Script"
     else
         display notification "No Terminal windows found" with title "Auto Continue Script"
     end if
