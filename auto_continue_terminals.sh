@@ -3,18 +3,19 @@
 # auto_continue_terminals.sh
 # 
 # Description:
-#   This script sends the 'continue' command to all open Terminal windows and tabs.
+#   This script sends commands to all open Terminal windows and tabs.
 #   It can either execute immediately or wait until a specified time.
 #   The script prevents system sleep while waiting using caffeinate.
 #
 # Usage:
-#   ./auto_continue_terminals.sh        # Execute immediately
-#   ./auto_continue_terminals.sh HH:MM  # Execute at specified time (24-hour format)
+#   ./auto_continue_terminals.sh                    # Execute immediately with 'continue'
+#   ./auto_continue_terminals.sh HH:MM              # Execute at specified time with 'continue'
+#   ./auto_continue_terminals.sh HH:MM "command"    # Execute at specified time with custom command
 #
 # Examples:
-#   ./auto_continue_terminals.sh        # Sends 'continue' to all terminals now
-#   ./auto_continue_terminals.sh 14:30  # Waits until 2:30 PM then sends 'continue'
-#   ./auto_continue_terminals.sh 09:00  # Waits until 9:00 AM then sends 'continue'
+#   ./auto_continue_terminals.sh                    # Sends 'continue' to all terminals now
+#   ./auto_continue_terminals.sh 14:30              # Waits until 2:30 PM then sends 'continue'
+#   ./auto_continue_terminals.sh 06:01 "ultrathink continue"  # Sends custom command at 6:01 AM
 #
 # Requirements:
 #   - macOS with Terminal app
@@ -24,11 +25,12 @@
 #
 # Notes:
 #   - Press Ctrl+C at any time to cancel execution
-#   - The script will send 'continue' + Enter to each tab in every Terminal window
+#   - The script will send the specified command + Enter to each tab in every Terminal window
 #   - System sleep is prevented while the script is running
+#   - Default command is 'continue' if not specified
 #
 # Author: Auto-generated script
-# Version: 1.1.0
+# Version: 1.2.0
 #
 
 # Enable strict error handling
@@ -58,14 +60,34 @@ trap cleanup EXIT INT TERM HUP
 # Handle Ctrl+C specifically
 trap 'echo -e "\n\nCtrl+C detected. Exiting..."; cleanup' INT
 
-# Check if time argument is provided
-if [ $# -eq 0 ]; then
-    echo "No time provided. Executing immediately..."
-    TARGET_TIME=$(date +"%H:%M")
-else
-    TARGET_TIME=$1
+# Default command
+COMMAND_TEXT="continue"
 
-    # Validate time format
+# Parse arguments
+if [ $# -eq 0 ]; then
+    echo "No time provided. Executing immediately with default command: '$COMMAND_TEXT'"
+    TARGET_TIME=$(date +"%H:%M")
+elif [ $# -eq 1 ]; then
+    # Only time provided
+    TARGET_TIME=$1
+    echo "Using default command: '$COMMAND_TEXT'"
+elif [ $# -eq 2 ]; then
+    # Time and custom command provided
+    TARGET_TIME=$1
+    COMMAND_TEXT=$2
+    echo "Using custom command: '$COMMAND_TEXT'"
+else
+    echo "Error: Too many arguments"
+    echo "Usage: $0 [HH:MM] [\"custom command\"]"
+    echo "Examples:"
+    echo "  $0                           # Execute immediately with 'continue'"
+    echo "  $0 14:30                     # Execute at 14:30 with 'continue'"
+    echo "  $0 14:30 \"ultrathink continue\" # Execute at 14:30 with custom command"
+    exit 1
+fi
+
+# Validate time format if time was provided
+if [ $# -ge 1 ]; then
     if ! [[ "$TARGET_TIME" =~ ^[0-9]{2}:[0-9]{2}$ ]]; then
         echo "Error: Time must be in HH:MM format"
         exit 1
@@ -98,8 +120,8 @@ fi
 
 echo "Caffeinate started with PID: $CAFFEINATE_PID"
 
-# Only wait if a specific time was provided
-if [ $# -ne 0 ]; then
+# Only wait if a specific time was provided and it's different from current time
+if [ $# -ge 1 ] && [ "$(date +"%H:%M")" != "$TARGET_TIME" ]; then
     # Function to get current time in HH:MM format
     get_current_time() {
         date +"%H:%M"
@@ -122,7 +144,7 @@ if [ $# -ne 0 ]; then
     done
 fi
 
-echo "Finding all Terminal windows and sending 'continue' command..."
+echo "Finding all Terminal windows and sending '$COMMAND_TEXT' command..."
 
 # Check if Terminal app is running (支援中文和英文版 macOS)
 if ! pgrep -x "Terminal" > /dev/null && ! pgrep -x "終端機" > /dev/null; then
@@ -172,25 +194,11 @@ tell application "$TERMINAL_APP"
                 -- Small delay to ensure the tab is active
                 delay 0.3
                 
-                -- Type "continue" and press Enter
+                -- Type the command and press Enter
                 tell application "System Events"
                     tell process "$TERMINAL_APP"
-                        -- Type "continue" letter by letter
-                        keystroke "c"
-                        delay 0.1
-                        keystroke "o"
-                        delay 0.1
-                        keystroke "n"
-                        delay 0.1
-                        keystroke "t"
-                        delay 0.1
-                        keystroke "i"
-                        delay 0.1
-                        keystroke "n"
-                        delay 0.1
-                        keystroke "u"
-                        delay 0.1
-                        keystroke "e"
+                        -- Type the command text
+                        keystroke "$COMMAND_TEXT"
                         delay 0.2
                         
                         -- Use key code 36 for Enter key
@@ -203,7 +211,7 @@ tell application "$TERMINAL_APP"
             end repeat
         end repeat
         
-        display notification "Sent 'continue' to all terminal windows" with title "Auto Continue Script"
+        display notification "Sent '$COMMAND_TEXT' to all terminal windows" with title "Auto Continue Script"
     else
         display notification "No Terminal windows found" with title "Auto Continue Script"
     end if
