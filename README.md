@@ -1,10 +1,19 @@
 # Claude Scripts Collection
 
-這是一個包含 Claude 相關實用腳本的集合。
+這是一個包含 Claude 相關實用腳本的集合，旨在最大化利用 Claude 訂閱價值。
+
+## 為什麼需要這些腳本？ / Why These Scripts?
+
+Claude 的對話視窗有 5 小時的活動時間限制。當你在睡覺或忙於其他事情時，這些寶貴的時間可能會被浪費。這個腳本集合幫助你：
+
+- 🎯 **最大化訂閱價值** - 在 5 小時視窗即將結束時自動續期
+- 😴 **睡眠時間自動化** - 設定在凌晨自動執行，不錯過任何可用時間
+- 🔄 **批量操作管理** - 同時管理多個 Claude 會話
+- ⏰ **精準時間控制** - 在最佳時機自動續期對話
 
 ## auto_continue_terminals.sh
 
-一個自動化腳本，用於向所有開啟的終端機視窗和分頁發送 "continue" 命令。特別適用於同時運行多個 Claude CLI 會話時的批量操作。
+一個自動化腳本，用於向所有開啟的終端機視窗和分頁發送 "continue" 命令。專為優化 Claude 使用時間而設計。
 
 ### 功能特點
 
@@ -14,7 +23,64 @@
 - 🌍 支援中英文版 macOS
 - 🛡️ 完整的錯誤處理和權限檢查
 
-### 使用方法
+### 典型使用場景 / Typical Use Cases
+
+#### 💤 睡眠時間最佳化 / Sleep Time Optimization
+```bash
+# 晚上 11:00 開始 Claude 任務
+# 在凌晨 3:50 自動續期（5小時視窗前）
+./auto_continue_terminals.sh 03:50
+
+# 早上醒來時，Claude 仍在運行，可以繼續工作！
+```
+
+#### 🏢 工作時間管理 / Work Time Management
+```bash
+# 早上 9:00 開始任務
+# 下午 1:50 自動續期
+./auto_continue_terminals.sh 13:50
+
+# 午餐時不需要擔心會話超時
+```
+
+#### 🌙 過夜任務處理 / Overnight Task Processing
+```bash
+# 設定多個時間點，確保長時間任務不中斷
+# 第一次續期：凌晨 2:00
+./auto_continue_terminals.sh 02:00
+# 第二次續期：早上 7:00（在另一個終端執行）
+./auto_continue_terminals.sh 07:00
+```
+
+### 為什麼不使用 crontab 或其他排程工具？ / Why Not Use crontab or Other Schedulers?
+
+這個腳本特意設計為**前台執行**而非背景排程，原因如下：
+
+#### 🖥️ **即時視覺反饋 / Real-time Visual Feedback**
+- 可以即時看到腳本執行狀態和 Claude 的回應
+- 在終端中保持完整的互動記錄
+- 發生問題時能立即介入處理
+
+#### 💤 **系統休眠問題 / System Sleep Issues**
+- macOS 的 crontab 在系統休眠時**不會執行**
+- launchd 雖然支援休眠喚醒，但配置複雜且不可靠
+- 本腳本使用 `caffeinate` 主動防止系統休眠
+
+#### 🔍 **透明度與控制 / Transparency and Control**
+- 可以隨時按 Ctrl+C 中斷執行
+- 清楚看到每個步驟的執行過程
+- 保持對 Claude 會話的完整掌控
+
+#### 🎯 **簡單可靠 / Simple and Reliable**
+```bash
+# crontab 的問題：系統休眠時不執行
+# 50 3 * * * /path/to/script.sh  # ❌ 電腦睡眠時會錯過
+
+# 本腳本的解決方案：主動防止休眠
+./auto_continue_terminals.sh 03:50  # ✅ 保證執行
+```
+
+### 使用方法 / Usage
 
 ```bash
 # 立即執行
